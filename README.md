@@ -11,7 +11,10 @@ A [pi](https://github.com/badlogic/pi-mono) extension for dynamic parallel agent
   - **Parallel**: Multiple tasks running concurrently with configurable concurrency
   - **Chain**: Sequential execution with `{previous}` placeholder for context passing
   - **Race**: Multiple models compete on the same task, first to complete wins
-- **Streaming Progress**: Real-time updates showing tool calls and output
+- **Streaming Progress**: Real-time updates showing tool calls and partial output
+- **Context Building**: Auto-read files and git context before execution
+- **Cross-Task References**: Use `{task_N}` to reference outputs from earlier parallel tasks
+- **Cost Tracking**: See per-task and total API costs
 - **Tool Restrictions**: Optionally restrict tools per task for safety/efficiency
 - **Custom System Prompts**: Override system prompts per task
 
@@ -125,6 +128,55 @@ Race haiku, gpt-4o-mini, and gemini-flash to summarize the README
 Have claude-haiku and gpt-4o-mini race to answer: what's the main purpose of this codebase?
 ```
 
+### Context Features
+
+#### Auto-read Files
+
+Specify files to read automatically and include as context:
+
+```json
+{
+  "tasks": [...],
+  "contextFiles": ["src/config.ts", "README.md"]
+}
+```
+
+#### Git Context
+
+Include git information automatically:
+
+```json
+{
+  "tasks": [...],
+  "gitContext": true
+}
+```
+
+This includes branch name, status, and changed files. For full diff:
+
+```json
+{
+  "gitContext": { "branch": true, "diff": true, "log": 5 }
+}
+```
+
+Options: `branch`, `status`, `diff`, `diffStats`, `log` (number of commits)
+
+#### Cross-Task References
+
+Reference earlier task outputs in parallel mode:
+
+```json
+{
+  "tasks": [
+    { "task": "Analyze the codebase structure", "name": "analyzer" },
+    { "task": "Based on {task_0}, suggest improvements", "name": "improver" }
+  ]
+}
+```
+
+When cross-references are detected, tasks run sequentially to allow substitution.
+
 ## Parameters Reference
 
 ### Single Mode
@@ -145,7 +197,9 @@ Have claude-haiku and gpt-4o-mini race to answer: what's the main purpose of thi
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `tasks` | TaskItem[] | Array of tasks to run (each can have `agent`, `model`, `tools`, etc.) |
-| `context` | string | Shared context for all tasks |
+| `context` | string | Shared context string for all tasks |
+| `contextFiles` | string[] | File paths to auto-read and include as context |
+| `gitContext` | boolean \| object | Include git info (true = branch + status + diffStats) |
 | `maxConcurrency` | number | Max concurrent tasks (default: 4, max: 8) |
 | `agentScope` | "user" \| "project" \| "both" | Agent discovery scope (default: "user") |
 
@@ -164,6 +218,35 @@ Have claude-haiku and gpt-4o-mini race to answer: what's the main purpose of thi
 | `race.models` | string[] | Models to compete |
 | `race.tools` | string[] | Tool restrictions |
 | `race.thinking` | number \| string | Thinking budget for all racers |
+
+## Output Features
+
+### Tool Usage Summary
+
+Results show which tools each subagent used:
+
+```
+### ✓ code-reviewer (13 turns, claude-haiku-4-5, $0.0042)
+**Tools used:** read×5, bash×3, grep×2
+
+The code looks good overall...
+```
+
+### Cost Tracking
+
+Per-task and total costs are displayed:
+
+```
+## Parallel: 3/3 succeeded | Total cost: $0.0156
+```
+
+### Full Output Files
+
+When output is truncated (>2000 chars), the full output is saved to a temp file:
+
+```
+... [truncated, full output: /tmp/parallel-code_reviewer-1738793234567.md]
+```
 
 ## Thinking Levels
 
@@ -209,8 +292,9 @@ pi -e ./src/index.ts
 
 1. Each task spawns a separate `pi` subprocess with `--mode json`
 2. Progress is streamed via JSON events from the subprocess
-3. Results are stored in the tool result `details` for session persistence
-4. On branch/restore, state is automatically correct for that point in history
+3. Context is built from files, git info, and user-provided strings
+4. Results include tool usage, costs, and full output files
+5. Session persistence works automatically via `details`
 
 ## License
 

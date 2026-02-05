@@ -18,7 +18,8 @@ src/
 ├── parallel.ts   # Concurrency utilities (worker pool, race with abort)
 ├── render.ts     # TUI rendering for progress and results
 ├── types.ts      # TypeScript types and Typebox schemas
-└── agents.ts     # Agent discovery and configuration resolution
+├── agents.ts     # Agent discovery and configuration resolution
+└── context.ts    # Context building (files, git info)
 ```
 
 ### Key Design Decisions
@@ -27,11 +28,15 @@ src/
 
 2. **State in tool details**: Results are stored in the tool result `details` field, which pi automatically persists. This enables session branching/restore without additional state management.
 
-3. **Streaming progress**: Uses `onUpdate` callback to emit progress during execution. The TUI shows real-time tool calls and output.
+3. **Streaming progress**: Uses `onUpdate` callback to emit progress during execution. The TUI shows real-time tool calls and partial output from running tasks.
 
 4. **Hybrid agent model**: Users can specify model/tools/thinking inline OR reference existing agents. When an agent is referenced, its settings are used as defaults and inline parameters override them.
 
 5. **Agent discovery**: Agents are discovered from `~/.pi/agent/agents/*.md` (user-level) and optionally `.pi/agents/*.md` (project-level) based on `agentScope` parameter.
+
+6. **Context building**: Context is built from multiple sources (user string, files, git info) before execution. This avoids subagents needing to re-read the same files.
+
+7. **Cross-task references**: When `{task_N}` placeholders are detected in parallel tasks, execution switches to sequential mode to allow substitution.
 
 ## Execution Modes
 
@@ -71,6 +76,39 @@ When an `agent` parameter is specified:
 
 Example: `{ agent: "scout", model: "claude-sonnet-4-5" }` uses scout's tools/systemPrompt but with sonnet model.
 
+## Context Building
+
+Context is built in `context.ts` from multiple sources:
+
+1. **User-provided string**: `params.context`
+2. **Auto-read files**: `params.contextFiles` - array of paths to read
+3. **Git context**: `params.gitContext` - branch, status, diff, log
+
+```typescript
+const sharedContext = buildContext(cwd, {
+  context: params.context,
+  contextFiles: params.contextFiles,
+  gitContext: params.gitContext,
+});
+```
+
+This reduces redundant file reads across parallel tasks.
+
+## Cross-Task References
+
+In parallel mode, tasks can reference earlier task outputs:
+
+```json
+{
+  "tasks": [
+    { "task": "Analyze the code", "name": "analyzer" },
+    { "task": "Based on {task_0}, suggest improvements" }
+  ]
+}
+```
+
+When `{task_N}` or `{result_N}` patterns are detected, `maxConcurrency` is set to 1 to ensure sequential execution.
+
 ## Code Conventions
 
 - **TypeScript strict mode**: All code must pass `tsc --noEmit`
@@ -92,6 +130,10 @@ pi -e ./src/index.ts --mode json -p 'your prompt here'
 # Test specific mode
 pi -e ./src/index.ts -p 'use haiku to count files in src/'
 pi -e ./src/index.ts -p 'race haiku and gpt-4o-mini to summarize README'
+
+# Test context features
+pi -e ./src/index.ts -p 'use haiku with git context to review changes'
+pi -e ./src/index.ts -p 'read package.json as context and have haiku analyze dependencies'
 
 # Test with existing agents (if you have scout defined in ~/.pi/agent/agents/)
 pi -e ./src/index.ts -p 'use the scout agent to find authentication code'
@@ -130,6 +172,13 @@ Agent discovery logic is in `agents.ts`:
 - `findAgent()` - Lookup by name
 - `resolveAgentSettings()` in `index.ts` - Merges agent defaults with inline overrides
 
+### Adding context sources
+
+Context building is in `context.ts`:
+- `readContextFiles()` - Reads files and formats as markdown
+- `getGitContext()` - Gathers git info (branch, diff, status, log)
+- `buildContext()` - Combines all sources into a single string
+
 ## Dependencies
 
 - `@mariozechner/pi-coding-agent`: Core pi types and extension API
@@ -146,6 +195,13 @@ All are peer dependencies - pi provides them at runtime.
 - Race mode aborts losers when winner completes
 - Parallel mode continues all tasks, aggregates successes/failures
 - AbortSignal propagates to kill subprocesses gracefully
+
+## Output Features
+
+- **Tool usage summary**: Shows which tools each subagent used (e.g., `read×5, bash×3`)
+- **Cost tracking**: Per-task and total API costs in output
+- **Full output files**: When output > 2000 chars, saves to temp file and includes path
+- **Streaming progress**: Updates include partial output from running tasks
 
 ## Output Limits
 

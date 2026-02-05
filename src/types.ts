@@ -206,6 +206,25 @@ export const ParallelParamsSchema = Type.Object({
       description: "Shared context prepended to all parallel tasks",
     })
   ),
+  contextFiles: Type.Optional(
+    Type.Array(Type.String(), {
+      description: "File paths to read and include as context (auto-read before execution)",
+    })
+  ),
+  gitContext: Type.Optional(
+    Type.Union([
+      Type.Boolean(),
+      Type.Object({
+        branch: Type.Optional(Type.Boolean({ description: "Include current branch name" })),
+        diff: Type.Optional(Type.Boolean({ description: "Include git diff (staged + unstaged)" })),
+        diffStats: Type.Optional(Type.Boolean({ description: "Include diff stats only (files changed)" })),
+        log: Type.Optional(Type.Number({ description: "Include last N commit messages" })),
+        status: Type.Optional(Type.Boolean({ description: "Include git status" })),
+      }),
+    ], {
+      description: "Include git context. true = branch + diffStats + status. Or specify options.",
+    })
+  ),
   maxConcurrency: Type.Optional(
     Type.Number({
       description: "Maximum concurrent tasks (default: 4)",

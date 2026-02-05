@@ -34,6 +34,7 @@ import { runAgent, type ExecutorOptions } from "./executor.js";
 import { mapWithConcurrencyLimit, raceWithAbort } from "./parallel.js";
 import { renderCall, renderResult } from "./render.js";
 import { discoverAgents, findAgent, formatAgentList, type AgentConfig } from "./agents.js";
+import { buildContext } from "./context.js";
 
 /**
  * Generate a unique task ID.
@@ -168,15 +169,31 @@ export default function (pi: ExtensionAPI) {
         winner,
       });
 
-      // Helper to emit progress update
+      // Helper to emit progress update with partial outputs
       const emitUpdate = (
         mode: ParallelToolDetails["mode"],
         results: TaskResult[],
         progress: TaskProgress[],
         winner?: string
       ) => {
+        // Build a summary of current progress including partial outputs
+        const running = progress.filter(p => p.status === "running");
+        const completed = progress.filter(p => p.status === "completed");
+        
+        let statusText = `Running: ${running.length} in progress, ${completed.length}/${progress.length} complete`;
+        
+        // Include recent output from running tasks (streaming partial results)
+        for (const p of running) {
+          if (p.recentOutput.length > 0) {
+            const lastOutput = p.recentOutput[p.recentOutput.length - 1];
+            statusText += `\n\n**${p.name || p.id}** (${p.toolCount} tools): ${lastOutput}`;
+          } else if (p.currentTool) {
+            statusText += `\n\n**${p.name || p.id}**: running ${p.currentTool}...`;
+          }
+        }
+        
         onUpdate?.({
-          content: [{ type: "text", text: "Running..." }],
+          content: [{ type: "text", text: statusText }],
           details: makeDetails(mode, results, progress, winner),
         });
       };
@@ -421,6 +438,13 @@ export default function (pi: ExtensionAPI) {
           tasks.length
         );
         
+        // Build shared context from all sources
+        const sharedContext = buildContext(cwd, {
+          context: params.context,
+          contextFiles: params.contextFiles,
+          gitContext: params.gitContext,
+        });
+        
         // Validate all agents exist before starting
         const missingAgents: string[] = [];
         for (const t of tasks) {
@@ -458,10 +482,15 @@ export default function (pi: ExtensionAPI) {
         });
 
         const allResults: TaskResult[] = [];
+        
+        // Check if any task has cross-references to other tasks
+        const crossRefPattern = /\{(task|result)_(\d+)\}/;
+        const hasCrossRefs = tasks.some(t => crossRefPattern.test(t.task));
 
         const { results: parallelResults, aborted } = await mapWithConcurrencyLimit(
           tasks,
-          maxConcurrency,
+          // If cross-refs exist, run sequentially to allow substitution
+          hasCrossRefs ? 1 : maxConcurrency,
           async (t, index) => {
             // Resolve agent settings for this task
             const resolved = resolveAgentSettings(t.agent, agents, {
@@ -476,15 +505,27 @@ export default function (pi: ExtensionAPI) {
 
             progress[index].status = "running";
             emitUpdate("parallel", allResults, progress);
+            
+            // Substitute cross-references with previous task outputs
+            let taskText = t.task;
+            if (hasCrossRefs) {
+              taskText = taskText.replace(/\{(task|result)_(\d+)\}/g, (match, _type, numStr) => {
+                const refIndex = parseInt(numStr, 10);
+                if (refIndex >= 0 && refIndex < allResults.length) {
+                  return allResults[refIndex].output || "(no output from task)";
+                }
+                return match; // Keep placeholder if referenced task doesn't exist yet
+              });
+            }
 
             const result = await runAgent({
-              task: t.task,
+              task: taskText,
               cwd: t.cwd || cwd,
               model: resolved.model,
               tools: resolved.tools,
               systemPrompt: resolved.systemPrompt,
               thinking: resolved.thinking,
-              context: params.context,
+              context: sharedContext,
               id: taskId,
               name: taskName,
               signal,
@@ -515,6 +556,7 @@ export default function (pi: ExtensionAPI) {
           const stats: string[] = [];
           if (r.usage.turns > 0) stats.push(`${r.usage.turns} turns`);
           if (r.model) stats.push(r.model);
+          if (r.usage.cost > 0) stats.push(`$${r.usage.cost.toFixed(4)}`);
           const statsStr = stats.length > 0 ? ` (${stats.join(", ")})` : "";
           const status = r.exitCode === 0 ? "✓" : "✗";
           
@@ -560,11 +602,15 @@ export default function (pi: ExtensionAPI) {
           return `### ${status} ${r.name || r.id}${statsStr}${toolSummary}\n\n${outputSection}`;
         });
 
+        // Calculate total cost
+        const totalCost = results.reduce((sum, r) => sum + (r.usage.cost || 0), 0);
+        const costInfo = totalCost > 0 ? ` | Total cost: $${totalCost.toFixed(4)}` : "";
+
         return {
           content: [
             {
               type: "text",
-              text: `## Parallel: ${successCount}/${results.length} succeeded${aborted ? " (aborted)" : ""}\n\n${summaries.join("\n\n---\n\n")}`,
+              text: `## Parallel: ${successCount}/${results.length} succeeded${aborted ? " (aborted)" : ""}${costInfo}\n\n${summaries.join("\n\n---\n\n")}`,
             },
           ],
           details: makeDetails("parallel", results, progress),
