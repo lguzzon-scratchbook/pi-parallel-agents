@@ -9,6 +9,9 @@
  * - Parallel: Multiple tasks running concurrently
  * - Chain: Sequential execution with {previous} placeholder
  * - Race: Multiple models compete on the same task
+ * 
+ * Agents can be specified inline (model, tools, systemPrompt) or by referencing
+ * existing agent definitions from ~/.pi/agent/agents or .pi/agents.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -17,15 +20,17 @@ import {
   type ParallelToolDetails,
   type TaskProgress,
   type TaskResult,
+  type AgentScope,
   ParallelParamsSchema,
   createEmptyUsage,
   addUsage,
   DEFAULT_CONCURRENCY,
   MAX_CONCURRENCY,
 } from "./types.js";
-import { runAgent } from "./executor.js";
+import { runAgent, type ExecutorOptions } from "./executor.js";
 import { mapWithConcurrencyLimit, raceWithAbort } from "./parallel.js";
 import { renderCall, renderResult } from "./render.js";
+import { discoverAgents, findAgent, formatAgentList, type AgentConfig } from "./agents.js";
 
 /**
  * Generate a unique task ID.
@@ -46,6 +51,46 @@ function aggregateUsage(results: TaskResult[]): ReturnType<typeof createEmptyUsa
   return total;
 }
 
+/**
+ * Resolve agent settings, merging agent defaults with inline overrides.
+ * Inline parameters take precedence over agent defaults.
+ */
+function resolveAgentSettings(
+  agentName: string | undefined,
+  agents: AgentConfig[],
+  overrides: {
+    model?: string;
+    tools?: string[];
+    systemPrompt?: string;
+    thinking?: number | string;
+  }
+): {
+  model?: string;
+  tools?: string[];
+  systemPrompt?: string;
+  thinking?: number | string;
+  agentConfig?: AgentConfig;
+} {
+  if (!agentName) {
+    return { ...overrides };
+  }
+
+  const agentConfig = findAgent(agents, agentName);
+  if (!agentConfig) {
+    // Agent not found - just use overrides
+    return { ...overrides };
+  }
+
+  // Merge: inline overrides take precedence
+  return {
+    model: overrides.model ?? agentConfig.model,
+    tools: overrides.tools ?? agentConfig.tools,
+    systemPrompt: overrides.systemPrompt ?? agentConfig.systemPrompt,
+    thinking: overrides.thinking ?? agentConfig.thinking,
+    agentConfig,
+  };
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "parallel",
@@ -58,12 +103,21 @@ export default function (pi: ExtensionAPI) {
       "- Chain: { chain: [{task, model?}, ...] } - sequential with {previous} placeholder",
       "- Race: { race: {task, models: [...]} } - first to complete wins",
       "Model examples: claude-haiku-4-5, gpt-4o-mini, claude-sonnet-4-5",
+      "",
+      "Agents: Reference existing agents by name (from ~/.pi/agent/agents or .pi/agents).",
+      "Set agentScope to 'both' to include project-local agents.",
+      "Agent settings (model, tools, systemPrompt) are used as defaults; inline params override.",
     ].join("\n"),
     parameters: ParallelParamsSchema,
 
     async execute(_toolCallId, params: ParallelParams, signal, onUpdate, ctx) {
       const startTime = Date.now();
       const cwd = params.cwd || ctx.cwd;
+      
+      // Discover available agents
+      const agentScope: AgentScope = params.agentScope ?? "user";
+      const discovery = discoverAgents(cwd, agentScope);
+      const agents = discovery.agents;
 
       // Determine mode - check for non-empty values
       const hasChain = Array.isArray(params.chain) && params.chain.length > 0;
@@ -75,11 +129,12 @@ export default function (pi: ExtensionAPI) {
         Number(hasChain) + Number(hasRace) + Number(hasTasks) + Number(hasSingle);
 
       if (modeCount !== 1) {
+        const { text: agentList } = formatAgentList(agents, 5);
         return {
           content: [
             {
               type: "text",
-              text: "Invalid parameters. Provide exactly one mode: task (single), tasks (parallel), chain, or race.",
+              text: `Invalid parameters. Provide exactly one mode: task (single), tasks (parallel), chain, or race.\n\nAvailable agents [${agentScope}]: ${agentList}`,
             },
           ],
           details: {
@@ -124,16 +179,38 @@ export default function (pi: ExtensionAPI) {
       // ========================================================================
       if (hasSingle && params.task) {
         const progress: TaskProgress[] = [];
-
-        const result = await runAgent({
-          task: params.task,
-          cwd,
+        
+        // Resolve agent settings
+        const resolved = resolveAgentSettings(params.agent, agents, {
           model: params.model,
           tools: params.tools,
           systemPrompt: params.systemPrompt,
           thinking: params.thinking,
+        });
+        
+        // Warn if agent was specified but not found
+        if (params.agent && !resolved.agentConfig) {
+          const { text: agentList } = formatAgentList(agents, 5);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Unknown agent: ${params.agent}\n\nAvailable agents [${agentScope}]: ${agentList}`,
+              },
+            ],
+            details: makeDetails("single", []),
+          };
+        }
+
+        const result = await runAgent({
+          task: params.task,
+          cwd,
+          model: resolved.model,
+          tools: resolved.tools,
+          systemPrompt: resolved.systemPrompt,
+          thinking: resolved.thinking,
           id: "single",
-          name: "single",
+          name: resolved.agentConfig?.name || "single",
           signal,
           onProgress: (p) => {
             progress[0] = p;
@@ -154,19 +231,48 @@ export default function (pi: ExtensionAPI) {
         const results: TaskResult[] = [];
         const progress: TaskProgress[] = [];
         let previousOutput = "";
+        
+        // Validate all agents exist before starting
+        const missingAgents: string[] = [];
+        for (const step of params.chain) {
+          if (step.agent && !findAgent(agents, step.agent)) {
+            missingAgents.push(step.agent);
+          }
+        }
+        if (missingAgents.length > 0) {
+          const { text: agentList } = formatAgentList(agents, 5);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Unknown agent(s) in chain: ${missingAgents.join(", ")}\n\nAvailable agents [${agentScope}]: ${agentList}`,
+              },
+            ],
+            details: makeDetails("chain", []),
+          };
+        }
 
         for (let i = 0; i < params.chain.length; i++) {
           const step = params.chain[i];
           const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
           const stepId = generateTaskId(i + 1, `step_${i + 1}`);
+          
+          // Resolve agent settings for this step
+          const resolved = resolveAgentSettings(step.agent, agents, {
+            model: step.model,
+            tools: step.tools,
+            systemPrompt: step.systemPrompt,
+            thinking: step.thinking,
+          });
+          const stepName = resolved.agentConfig?.name || `Step ${i + 1}`;
 
           // Initialize progress for this step
           progress[i] = {
             id: stepId,
-            name: `Step ${i + 1}`,
+            name: stepName,
             status: "running",
             task: taskWithContext,
-            model: step.model,
+            model: resolved.model,
             recentTools: [],
             recentOutput: [],
             toolCount: 0,
@@ -177,12 +283,12 @@ export default function (pi: ExtensionAPI) {
           const result = await runAgent({
             task: taskWithContext,
             cwd,
-            model: step.model,
-            tools: step.tools,
-            systemPrompt: step.systemPrompt,
-            thinking: step.thinking,
+            model: resolved.model,
+            tools: resolved.tools,
+            systemPrompt: resolved.systemPrompt,
+            thinking: resolved.thinking,
             id: stepId,
-            name: `Step ${i + 1}`,
+            name: stepName,
             step: i + 1,
             signal,
             onProgress: (p) => {
@@ -307,19 +413,42 @@ export default function (pi: ExtensionAPI) {
           MAX_CONCURRENCY,
           tasks.length
         );
+        
+        // Validate all agents exist before starting
+        const missingAgents: string[] = [];
+        for (const t of tasks) {
+          if (t.agent && !findAgent(agents, t.agent)) {
+            missingAgents.push(t.agent);
+          }
+        }
+        if (missingAgents.length > 0) {
+          const { text: agentList } = formatAgentList(agents, 5);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Unknown agent(s): ${[...new Set(missingAgents)].join(", ")}\n\nAvailable agents [${agentScope}]: ${agentList}`,
+              },
+            ],
+            details: makeDetails("parallel", []),
+          };
+        }
 
-        const progress: TaskProgress[] = tasks.map((t, i) => ({
-          id: generateTaskId(i, t.name),
-          name: t.name,
-          status: "pending" as const,
-          task: t.task,
-          model: t.model,
-          recentTools: [],
-          recentOutput: [],
-          toolCount: 0,
-          tokens: 0,
-          durationMs: 0,
-        }));
+        const progress: TaskProgress[] = tasks.map((t, i) => {
+          const resolved = resolveAgentSettings(t.agent, agents, { model: t.model });
+          return {
+            id: generateTaskId(i, t.name || resolved.agentConfig?.name),
+            name: t.name || resolved.agentConfig?.name,
+            status: "pending" as const,
+            task: t.task,
+            model: resolved.model,
+            recentTools: [],
+            recentOutput: [],
+            toolCount: 0,
+            tokens: 0,
+            durationMs: 0,
+          };
+        });
 
         const allResults: TaskResult[] = [];
 
@@ -327,7 +456,16 @@ export default function (pi: ExtensionAPI) {
           tasks,
           maxConcurrency,
           async (t, index) => {
-            const taskId = generateTaskId(index, t.name);
+            // Resolve agent settings for this task
+            const resolved = resolveAgentSettings(t.agent, agents, {
+              model: t.model,
+              tools: t.tools,
+              systemPrompt: t.systemPrompt,
+              thinking: t.thinking,
+            });
+            
+            const taskId = generateTaskId(index, t.name || resolved.agentConfig?.name);
+            const taskName = t.name || resolved.agentConfig?.name;
 
             progress[index].status = "running";
             emitUpdate("parallel", allResults, progress);
@@ -335,13 +473,13 @@ export default function (pi: ExtensionAPI) {
             const result = await runAgent({
               task: t.task,
               cwd: t.cwd || cwd,
-              model: t.model,
-              tools: t.tools,
-              systemPrompt: t.systemPrompt,
-              thinking: t.thinking,
+              model: resolved.model,
+              tools: resolved.tools,
+              systemPrompt: resolved.systemPrompt,
+              thinking: resolved.thinking,
               context: params.context,
               id: taskId,
-              name: t.name,
+              name: taskName,
               signal,
               onProgress: (p) => {
                 progress[index] = p;

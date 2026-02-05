@@ -99,8 +99,9 @@ export function renderCall(args: ParallelParams, theme: Theme): Text {
       const step = args.chain[i];
       const cleanTask = step.task.replace(/\{previous\}/g, "").trim();
       const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
+      const agentInfo = step.agent ? theme.fg("accent", step.agent) + " " : "";
       const modelInfo = step.model ? theme.fg("muted", ` [${step.model}]`) : "";
-      text += `\n  ${theme.fg("muted", `${i + 1}.`)} ${theme.fg("dim", preview)}${modelInfo}`;
+      text += `\n  ${theme.fg("muted", `${i + 1}.`)} ${agentInfo}${theme.fg("dim", preview)}${modelInfo}`;
     }
 
     if (args.chain.length > 3) {
@@ -138,9 +139,10 @@ export function renderCall(args: ParallelParams, theme: Theme): Text {
 
     for (const t of args.tasks.slice(0, 3)) {
       const preview = t.task.length > 40 ? `${t.task.slice(0, 40)}...` : t.task;
+      const agentInfo = t.agent ? theme.fg("accent", t.agent) + " " : "";
       const modelInfo = t.model ? theme.fg("muted", ` [${t.model}]`) : "";
       const nameInfo = t.name ? theme.fg("accent", `${t.name}: `) : "";
-      text += `\n  ${nameInfo}${theme.fg("dim", preview)}${modelInfo}`;
+      text += `\n  ${nameInfo}${agentInfo}${theme.fg("dim", preview)}${modelInfo}`;
     }
 
     if (args.tasks.length > 3) {
@@ -156,12 +158,13 @@ export function renderCall(args: ParallelParams, theme: Theme): Text {
       ? `${args.task.slice(0, 60)}...`
       : args.task
     : "...";
+  const agentInfo = args.agent ? theme.fg("accent", args.agent) + " " : "";
   const modelInfo = args.model ? theme.fg("muted", ` [${args.model}]`) : "";
   let text =
     theme.fg("toolTitle", theme.bold("parallel ")) +
     theme.fg("accent", "single") +
     modelInfo;
-  text += `\n  ${theme.fg("dim", taskPreview)}`;
+  text += `\n  ${agentInfo}${theme.fg("dim", taskPreview)}`;
 
   return new Text(text, 0, 0);
 }

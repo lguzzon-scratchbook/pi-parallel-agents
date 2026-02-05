@@ -1,10 +1,11 @@
 # pi-parallel-agents
 
-A [pi](https://github.com/badlogic/pi-mono) extension for dynamic parallel agent execution. Run multiple agents with different models in parallel, without requiring pre-defined agent configurations.
+A [pi](https://github.com/badlogic/pi-mono) extension for dynamic parallel agent execution. Run multiple agents with different models in parallel, with or without pre-defined agent configurations.
 
 ## Features
 
 - **Dynamic Model Selection**: Specify model per task inline (e.g., `claude-haiku-4-5`, `gpt-4o-mini`)
+- **Agent Integration**: Reference existing agents from `~/.pi/agent/agents` or `.pi/agents`
 - **Four Execution Modes**:
   - **Single**: One task with optional model/tools override
   - **Parallel**: Multiple tasks running concurrently with configurable concurrency
@@ -29,6 +30,34 @@ pi install /path/to/pi-parallel-agents
 ## Usage
 
 The extension registers a `parallel` tool that the LLM can use. Just describe what you want in natural language:
+
+### Using Existing Agents
+
+Reference agents defined in `~/.pi/agent/agents/*.md` (user-level) or `.pi/agents/*.md` (project-level):
+
+```
+Use the scout agent to find all authentication code
+```
+
+```
+Run a chain: scout to analyze the codebase, then planner to create an implementation plan
+```
+
+```
+In parallel, have scout find models and worker implement the changes
+```
+
+Agent settings (model, tools, systemPrompt) are used as defaults. Inline parameters override agent defaults:
+
+```
+Use the scout agent with sonnet model to analyze performance
+```
+
+To include project-local agents, set `agentScope` to `"both"`:
+
+```
+Use agent scope "both" and run the project-specific linter agent
+```
 
 ### Single Task
 
@@ -103,25 +132,29 @@ Have claude-haiku and gpt-4o-mini race to answer: what's the main purpose of thi
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `task` | string | Task to execute |
-| `model` | string | Model to use (e.g., "claude-haiku-4-5") |
-| `tools` | string[] | Restrict to specific tools |
-| `systemPrompt` | string | Override system prompt |
+| `agent` | string | Name of an existing agent to use (optional) |
+| `model` | string | Model to use (e.g., "claude-haiku-4-5"). Overrides agent default |
+| `tools` | string[] | Restrict to specific tools. Overrides agent default |
+| `systemPrompt` | string | Override system prompt. Overrides agent default |
 | `thinking` | number \| string | Thinking budget (tokens or "low"/"medium"/"high") |
 | `cwd` | string | Working directory |
+| `agentScope` | "user" \| "project" \| "both" | Agent discovery scope (default: "user") |
 
 ### Parallel Mode
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `tasks` | TaskItem[] | Array of tasks to run (each can have its own `thinking`) |
+| `tasks` | TaskItem[] | Array of tasks to run (each can have `agent`, `model`, `tools`, etc.) |
 | `context` | string | Shared context for all tasks |
 | `maxConcurrency` | number | Max concurrent tasks (default: 4, max: 8) |
+| `agentScope` | "user" \| "project" \| "both" | Agent discovery scope (default: "user") |
 
 ### Chain Mode
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `chain` | ChainStep[] | Sequential steps (each can have its own `thinking`) |
+| `chain` | ChainStep[] | Sequential steps (each can have `agent`, `model`, `tools`, etc.) |
+| `agentScope` | "user" \| "project" \| "both" | Agent discovery scope (default: "user") |
 
 ### Race Mode
 

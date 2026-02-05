@@ -3,6 +3,7 @@
  */
 
 import { Type, type Static } from "@sinclair/typebox";
+import { StringEnum } from "@mariozechner/pi-ai";
 
 // ============================================================================
 // Usage & Stats Types
@@ -94,27 +95,40 @@ export interface ParallelToolDetails {
 // Typebox Schemas
 // ============================================================================
 
+/** Agent scope for discovering agents */
+export const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
+  description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
+  default: "user",
+});
+
+export type AgentScope = Static<typeof AgentScopeSchema>;
+
 /** Schema for a single task item in parallel mode */
 export const TaskItemSchema = Type.Object({
   task: Type.String({ description: "Task to execute" }),
   name: Type.Optional(Type.String({ description: "Display name for this task" })),
+  agent: Type.Optional(
+    Type.String({
+      description: 'Name of an existing agent to use (from ~/.pi/agent/agents or .pi/agents). Agent settings (model, tools, systemPrompt) are used as defaults.',
+    })
+  ),
   model: Type.Optional(
     Type.String({
-      description: 'Model to use (e.g., "claude-haiku-4-5", "gpt-4o-mini")',
+      description: 'Model to use (e.g., "claude-haiku-4-5", "gpt-4o-mini"). Overrides agent default.',
     })
   ),
   tools: Type.Optional(
     Type.Array(Type.String(), {
-      description: "Restrict to specific tools (e.g., [\"read\", \"grep\", \"find\"])",
+      description: 'Restrict to specific tools (e.g., ["read", "grep", "find"]). Overrides agent default.',
     })
   ),
   systemPrompt: Type.Optional(
-    Type.String({ description: "Override system prompt for this task" })
+    Type.String({ description: "Override system prompt for this task. Overrides agent default." })
   ),
   cwd: Type.Optional(Type.String({ description: "Working directory for this task" })),
   thinking: Type.Optional(
     Type.Union([Type.Number(), Type.String()], {
-      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
+      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high". Overrides agent default.',
     })
   ),
 });
@@ -126,12 +140,17 @@ export const ChainStepSchema = Type.Object({
   task: Type.String({
     description: "Task with optional {previous} placeholder for prior output",
   }),
-  model: Type.Optional(Type.String({ description: "Model to use for this step" })),
-  tools: Type.Optional(Type.Array(Type.String(), { description: "Restrict tools" })),
-  systemPrompt: Type.Optional(Type.String({ description: "Override system prompt" })),
+  agent: Type.Optional(
+    Type.String({
+      description: 'Name of an existing agent to use. Agent settings are used as defaults.',
+    })
+  ),
+  model: Type.Optional(Type.String({ description: "Model to use for this step. Overrides agent default." })),
+  tools: Type.Optional(Type.Array(Type.String(), { description: "Restrict tools. Overrides agent default." })),
+  systemPrompt: Type.Optional(Type.String({ description: "Override system prompt. Overrides agent default." })),
   thinking: Type.Optional(
     Type.Union([Type.Number(), Type.String()], {
-      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
+      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high". Overrides agent default.',
     })
   ),
 });
@@ -157,14 +176,22 @@ export type RaceConfig = Static<typeof RaceConfigSchema>;
 
 /** Main tool parameters schema */
 export const ParallelParamsSchema = Type.Object({
+  // Agent discovery
+  agentScope: Type.Optional(AgentScopeSchema),
+
   // Single task mode
   task: Type.Optional(Type.String({ description: "Single task to execute" })),
-  model: Type.Optional(Type.String({ description: "Model for single task" })),
-  tools: Type.Optional(Type.Array(Type.String(), { description: "Tools for single task" })),
-  systemPrompt: Type.Optional(Type.String({ description: "System prompt for single task" })),
+  agent: Type.Optional(
+    Type.String({
+      description: 'Name of an existing agent to use (for single mode). Agent settings are used as defaults.',
+    })
+  ),
+  model: Type.Optional(Type.String({ description: "Model for single task. Overrides agent default." })),
+  tools: Type.Optional(Type.Array(Type.String(), { description: "Tools for single task. Overrides agent default." })),
+  systemPrompt: Type.Optional(Type.String({ description: "System prompt for single task. Overrides agent default." })),
   thinking: Type.Optional(
     Type.Union([Type.Number(), Type.String()], {
-      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
+      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high". Overrides agent default.',
     })
   ),
 
