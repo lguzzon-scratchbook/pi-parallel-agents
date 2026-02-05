@@ -33,6 +33,8 @@ export interface ExecutorOptions {
   systemPrompt?: string;
   /** Shared context to prepend to task */
   context?: string;
+  /** Thinking budget: number of tokens, or level like "low", "medium", "high" */
+  thinking?: number | string;
   /** Unique identifier for this task */
   id: string;
   /** Display name */
@@ -237,6 +239,7 @@ export async function runAgent(options: ExecutorOptions): Promise<TaskResult> {
     tools,
     systemPrompt,
     context,
+    thinking,
     id,
     name,
     step,
@@ -278,6 +281,11 @@ export async function runAgent(options: ExecutorOptions): Promise<TaskResult> {
 
   if (tools && tools.length > 0) {
     args.push("--tools", tools.join(","));
+  }
+
+  // Handle thinking budget
+  if (thinking !== undefined) {
+    args.push("--thinking", String(thinking));
   }
 
   // Handle system prompt

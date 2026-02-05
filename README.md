@@ -106,13 +106,14 @@ Have claude-haiku and gpt-4o-mini race to answer: what's the main purpose of thi
 | `model` | string | Model to use (e.g., "claude-haiku-4-5") |
 | `tools` | string[] | Restrict to specific tools |
 | `systemPrompt` | string | Override system prompt |
+| `thinking` | number \| string | Thinking budget (tokens or "low"/"medium"/"high") |
 | `cwd` | string | Working directory |
 
 ### Parallel Mode
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `tasks` | TaskItem[] | Array of tasks to run |
+| `tasks` | TaskItem[] | Array of tasks to run (each can have its own `thinking`) |
 | `context` | string | Shared context for all tasks |
 | `maxConcurrency` | number | Max concurrent tasks (default: 4, max: 8) |
 
@@ -120,7 +121,7 @@ Have claude-haiku and gpt-4o-mini race to answer: what's the main purpose of thi
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `chain` | ChainStep[] | Sequential steps with optional `{previous}` placeholder |
+| `chain` | ChainStep[] | Sequential steps (each can have its own `thinking`) |
 
 ### Race Mode
 
@@ -129,6 +130,23 @@ Have claude-haiku and gpt-4o-mini race to answer: what's the main purpose of thi
 | `race.task` | string | Task to race |
 | `race.models` | string[] | Models to compete |
 | `race.tools` | string[] | Tool restrictions |
+| `race.thinking` | number \| string | Thinking budget for all racers |
+
+## Thinking Levels
+
+You can specify thinking budget per task:
+
+```
+Have sonnet think deeply about this architecture problem (use high thinking)
+```
+
+```
+Use opus with extended thinking to review this complex algorithm
+```
+
+Supported values:
+- Numbers: Token budget (e.g., `10000`, `50000`)
+- Strings: `"low"`, `"medium"`, `"high"`
 
 ## Model Names
 

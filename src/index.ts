@@ -131,6 +131,7 @@ export default function (pi: ExtensionAPI) {
           model: params.model,
           tools: params.tools,
           systemPrompt: params.systemPrompt,
+          thinking: params.thinking,
           id: "single",
           name: "single",
           signal,
@@ -179,6 +180,7 @@ export default function (pi: ExtensionAPI) {
             model: step.model,
             tools: step.tools,
             systemPrompt: step.systemPrompt,
+            thinking: step.thinking,
             id: stepId,
             name: `Step ${i + 1}`,
             step: i + 1,
@@ -222,7 +224,7 @@ export default function (pi: ExtensionAPI) {
       // Race Mode
       // ========================================================================
       if (hasRace && params.race) {
-        const { task, models, tools, systemPrompt } = params.race;
+        const { task, models, tools, systemPrompt, thinking } = params.race;
         const results: TaskResult[] = [];
         const progress: TaskProgress[] = [];
 
@@ -255,6 +257,7 @@ export default function (pi: ExtensionAPI) {
               model,
               tools,
               systemPrompt,
+              thinking,
               id: model,
               name: model,
               signal: raceSignal,
@@ -335,6 +338,7 @@ export default function (pi: ExtensionAPI) {
               model: t.model,
               tools: t.tools,
               systemPrompt: t.systemPrompt,
+              thinking: t.thinking,
               context: params.context,
               id: taskId,
               name: t.name,

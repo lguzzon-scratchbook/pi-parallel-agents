@@ -112,6 +112,11 @@ export const TaskItemSchema = Type.Object({
     Type.String({ description: "Override system prompt for this task" })
   ),
   cwd: Type.Optional(Type.String({ description: "Working directory for this task" })),
+  thinking: Type.Optional(
+    Type.Union([Type.Number(), Type.String()], {
+      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
+    })
+  ),
 });
 
 export type TaskItem = Static<typeof TaskItemSchema>;
@@ -124,6 +129,11 @@ export const ChainStepSchema = Type.Object({
   model: Type.Optional(Type.String({ description: "Model to use for this step" })),
   tools: Type.Optional(Type.Array(Type.String(), { description: "Restrict tools" })),
   systemPrompt: Type.Optional(Type.String({ description: "Override system prompt" })),
+  thinking: Type.Optional(
+    Type.Union([Type.Number(), Type.String()], {
+      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
+    })
+  ),
 });
 
 export type ChainStep = Static<typeof ChainStepSchema>;
@@ -136,6 +146,11 @@ export const RaceConfigSchema = Type.Object({
   }),
   tools: Type.Optional(Type.Array(Type.String(), { description: "Restrict tools" })),
   systemPrompt: Type.Optional(Type.String({ description: "Override system prompt" })),
+  thinking: Type.Optional(
+    Type.Union([Type.Number(), Type.String()], {
+      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
+    })
+  ),
 });
 
 export type RaceConfig = Static<typeof RaceConfigSchema>;
@@ -147,6 +162,11 @@ export const ParallelParamsSchema = Type.Object({
   model: Type.Optional(Type.String({ description: "Model for single task" })),
   tools: Type.Optional(Type.Array(Type.String(), { description: "Tools for single task" })),
   systemPrompt: Type.Optional(Type.String({ description: "System prompt for single task" })),
+  thinking: Type.Optional(
+    Type.Union([Type.Number(), Type.String()], {
+      description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
+    })
+  ),
 
   // Parallel mode
   tasks: Type.Optional(
