@@ -518,6 +518,25 @@ export default function (pi: ExtensionAPI) {
           const statsStr = stats.length > 0 ? ` (${stats.join(", ")})` : "";
           const status = r.exitCode === 0 ? "✓" : "✗";
           
+          // Build tool usage summary from progress
+          const taskProgress = progress[idx];
+          let toolSummary = "";
+          if (taskProgress && taskProgress.recentTools.length > 0) {
+            const toolCounts = new Map<string, number>();
+            for (const t of taskProgress.recentTools) {
+              toolCounts.set(t.tool, (toolCounts.get(t.tool) || 0) + 1);
+            }
+            const toolList = Array.from(toolCounts.entries())
+              .map(([tool, count]) => count > 1 ? `${tool}×${count}` : tool)
+              .join(", ");
+            const moreTools = taskProgress.toolCount - taskProgress.recentTools.length;
+            toolSummary = moreTools > 0 
+              ? `\n**Tools used:** ${toolList} (+${moreTools} more)`
+              : `\n**Tools used:** ${toolList}`;
+          } else if (taskProgress && taskProgress.toolCount > 0) {
+            toolSummary = `\n**Tools used:** ${taskProgress.toolCount} tool calls`;
+          }
+          
           // Include output - up to 2000 chars per task, save full to file if longer
           const maxLen = 2000;
           let outputSection: string;
@@ -538,7 +557,7 @@ export default function (pi: ExtensionAPI) {
             outputSection = output || "(no output)";
           }
           
-          return `### ${status} ${r.name || r.id}${statsStr}\n\n${outputSection}`;
+          return `### ${status} ${r.name || r.id}${statsStr}${toolSummary}\n\n${outputSection}`;
         });
 
         return {
