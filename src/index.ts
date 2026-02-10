@@ -91,10 +91,11 @@ function resolveAgentSettings(
   }
 
   // Merge: inline overrides take precedence
+  // Use resolved fields if available (after inheritance), otherwise fall back to direct fields
   return {
     provider: overrides.provider,
-    model: overrides.model ?? agentConfig.model,
-    tools: overrides.tools ?? agentConfig.tools,
+    model: overrides.model ?? agentConfig.resolvedModel ?? agentConfig.model,
+    tools: overrides.tools ?? agentConfig.resolvedTools ?? agentConfig.tools,
     systemPrompt: overrides.systemPrompt ?? agentConfig.systemPrompt,
     thinking: overrides.thinking ?? agentConfig.thinking,
     agentConfig,

@@ -31,6 +31,12 @@ export interface AgentConfig {
   thinking?: number | string;
   source: "user" | "project";
   filePath: string;
+  /** Name of base agent to inherit from */
+  extends?: string;
+  /** Computed tools after inheritance resolution */
+  resolvedTools?: string[];
+  /** Computed model after inheritance resolution */
+  resolvedModel?: string;
 }
 
 export interface AgentDiscoveryResult {
@@ -87,6 +93,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
       thinking: frontmatter.thinking,
       source,
       filePath,
+      extends: frontmatter.extends,
     });
   }
 
@@ -102,6 +109,84 @@ function isDirectory(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve agent inheritance by computing resolvedTools and resolvedModel fields.
+ * Base agents are looked up by name in the provided agents list.
+ * Tools from base agents are combined (union) with child agent tools.
+ * Model from child overrides base model.
+ * Circular dependencies are detected and will throw an error.
+ */
+export function resolveAgentInheritance(agents: AgentConfig[]): AgentConfig[] {
+  // Create a map for quick lookup
+  const agentMap = new Map<string, AgentConfig>();
+  for (const agent of agents) {
+    agentMap.set(agent.name, agent);
+  }
+
+  // Track visited agents to detect cycles
+  const visited = new Set<string>();
+  const resolved = new Set<string>();
+
+  function resolve(agentName: string, path: string[] = []): void {
+    if (path.includes(agentName)) {
+      throw new Error(`Circular inheritance detected: ${path.join(" -> ")} -> ${agentName}`);
+    }
+
+    const agent = agentMap.get(agentName);
+    if (!agent) {
+      throw new Error(`Base agent "${agentName}" not found`);
+    }
+
+    if (resolved.has(agentName)) {
+      return; // Already resolved
+    }
+
+    if (visited.has(agentName)) {
+      throw new Error(`Circular inheritance detected involving "${agentName}"`);
+    }
+
+    visited.add(agentName);
+
+    // Resolve base agent first if any
+    if (agent.extends) {
+      resolve(agent.extends, [...path, agentName]);
+      const baseAgent = agentMap.get(agent.extends);
+      if (baseAgent) {
+        // Combine tools: union of base and child tools
+        const baseTools = baseAgent.resolvedTools || baseAgent.tools || [];
+        const childTools = agent.tools || [];
+        const combinedTools = [...new Set([...baseTools, ...childTools])];
+        if (combinedTools.length > 0) {
+          agent.resolvedTools = combinedTools;
+        }
+
+        // Model: child overrides base
+        agent.resolvedModel = agent.model || baseAgent.resolvedModel || baseAgent.model;
+      }
+    } else {
+      // No inheritance, just copy tools/model to resolved fields
+      if (agent.tools && agent.tools.length > 0) {
+        agent.resolvedTools = [...agent.tools];
+      }
+      if (agent.model) {
+        agent.resolvedModel = agent.model;
+      }
+    }
+
+    resolved.add(agentName);
+    visited.delete(agentName);
+  }
+
+  // Resolve all agents
+  for (const agent of agents) {
+    if (!resolved.has(agent.name)) {
+      resolve(agent.name);
+    }
+  }
+
+  return agents;
 }
 
 /**
@@ -148,7 +233,12 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
     for (const agent of projectAgents) agentMap.set(agent.name, agent);
   }
 
-  return { agents: Array.from(agentMap.values()), projectAgentsDir };
+  const allAgents = Array.from(agentMap.values());
+  
+  // Resolve inheritance for all agents
+  const resolvedAgents = resolveAgentInheritance(allAgents);
+  
+  return { agents: resolvedAgents, projectAgentsDir };
 }
 
 /**

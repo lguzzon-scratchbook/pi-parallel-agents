@@ -18,6 +18,9 @@ export interface GitContextOptions {
   status?: boolean;
 }
 
+// Allow injection of execSync for testing
+export let execGitSync = execSync;
+
 /**
  * Read files and return their contents as context.
  */
@@ -55,7 +58,7 @@ export function getGitContext(cwd: string, options: GitContextOptions | boolean)
   // Helper to run git commands safely
   const git = (args: string, maxLen = 10000): string | null => {
     try {
-      const result = execSync(`git ${args}`, { 
+      const result = execGitSync(`git ${args}`, { 
         cwd, 
         encoding: "utf-8",
         timeout: 5000,

@@ -42,6 +42,30 @@ export function addUsage(target: UsageStats, source: Partial<UsageStats>): void 
 }
 
 // ============================================================================
+// Resource Limits
+// ============================================================================
+
+/** Schema for resource limits */
+export const ResourceLimitsSchema = Type.Object({
+  maxMemoryMB: Type.Optional(Type.Number({ description: "Maximum memory usage in megabytes" })),
+  maxDurationMs: Type.Optional(Type.Number({ description: "Maximum execution duration in milliseconds" })),
+  maxConcurrentToolCalls: Type.Optional(Type.Number({ description: "Maximum concurrent tool calls allowed" })),
+  enforceLimits: Type.Optional(Type.Boolean({ description: "Whether to enforce limits (if false, limits are advisory)" })),
+});
+
+export type ResourceLimits = Static<typeof ResourceLimitsSchema>;
+
+/** Schema for retry configuration */
+export const RetryConfigSchema = Type.Object({
+  maxAttempts: Type.Number({ description: "Maximum number of retry attempts (including the initial attempt)" }),
+  backoffMs: Type.Number({ description: "Base delay in milliseconds between retries" }),
+  retryOn: Type.Optional(Type.Array(Type.String(), { description: "Only retry on errors matching these patterns" })),
+  skipOn: Type.Optional(Type.Array(Type.String(), { description: "Skip (don't retry) on errors matching these patterns" })),
+});
+
+export type RetryConfig = Static<typeof RetryConfigSchema>;
+
+// ============================================================================
 // Result Types
 // ============================================================================
 
@@ -153,6 +177,8 @@ export const TaskItemSchema = Type.Object({
       description: 'Thinking budget: number of tokens, or level like "low", "medium", "high". Overrides agent default.',
     })
   ),
+  resourceLimits: Type.Optional(ResourceLimitsSchema),
+  retry: Type.Optional(RetryConfigSchema),
 });
 
 export type TaskItem = Static<typeof TaskItemSchema>;
@@ -178,6 +204,8 @@ export const ChainStepSchema = Type.Object({
       description: 'Thinking budget: number of tokens, or level like "low", "medium", "high". Overrides agent default.',
     })
   ),
+  resourceLimits: Type.Optional(ResourceLimitsSchema),
+  retry: Type.Optional(RetryConfigSchema),
 });
 
 export type ChainStep = Static<typeof ChainStepSchema>;
@@ -198,6 +226,8 @@ export const RaceConfigSchema = Type.Object({
       description: 'Thinking budget: number of tokens, or level like "low", "medium", "high"',
     })
   ),
+  resourceLimits: Type.Optional(ResourceLimitsSchema),
+  retry: Type.Optional(RetryConfigSchema),
 });
 
 export type RaceConfig = Static<typeof RaceConfigSchema>;
@@ -240,6 +270,8 @@ export const TeamMemberSchema = Type.Object({
       description: 'Thinking budget. Overrides agent default.',
     })
   ),
+  resourceLimits: Type.Optional(ResourceLimitsSchema),
+  retry: Type.Optional(RetryConfigSchema),
 });
 
 export type TeamMemberDef = Static<typeof TeamMemberSchema>;
@@ -283,6 +315,8 @@ export const TeamTaskSchema = Type.Object({
     })
   ),
   review: Type.Optional(ReviewConfigSchema),
+  resourceLimits: Type.Optional(ResourceLimitsSchema),
+  retry: Type.Optional(RetryConfigSchema),
 });
 
 export type TeamTask = Static<typeof TeamTaskSchema>;
@@ -326,6 +360,7 @@ export const ParallelParamsSchema = Type.Object({
       description: 'Thinking budget: number of tokens, or level like "low", "medium", "high". Overrides agent default.',
     })
   ),
+  resourceLimits: Type.Optional(ResourceLimitsSchema),
 
   // Parallel mode
   tasks: Type.Optional(

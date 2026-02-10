@@ -13,11 +13,109 @@ import {
   type TaskProgress,
   type TaskResult,
   type UsageStats,
+  type ResourceLimits,
+  type RetryConfig,
   createEmptyUsage,
   addUsage,
   MAX_OUTPUT_BYTES,
   MAX_OUTPUT_LINES,
 } from "./types.js";
+
+// ============================================================================
+// Retry Functions
+// ============================================================================
+
+/**
+ * Check if an error should trigger a retry.
+ */
+export function shouldRetry(error: string, retry?: RetryConfig): boolean {
+  if (!retry) return false;
+
+  // If skipOn patterns are defined, check them first
+  if (retry.skipOn && retry.skipOn.length > 0) {
+    for (const pattern of retry.skipOn) {
+      if (error.toLowerCase().includes(pattern.toLowerCase())) {
+        return false;
+      }
+    }
+  }
+
+  // If retryOn is empty or not defined, retry on any error
+  if (!retry.retryOn || retry.retryOn.length === 0) {
+    return true;
+  }
+
+  // Check if error matches any retryOn pattern
+  for (const pattern of retry.retryOn) {
+    if (error.toLowerCase().includes(pattern.toLowerCase())) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Calculate exponential backoff delay with 60 second cap.
+ */
+export function calculateBackoff(baseMs: number, attempt: number): number {
+  const delay = baseMs * Math.pow(2, attempt - 1);
+  return Math.min(delay, 60000); // Cap at 60 seconds
+}
+
+/**
+ * Run an agent with retry logic.
+ */
+export async function runAgentWithRetry(
+  options: ExecutorOptions,
+  runAgentFn: (opts: ExecutorOptions) => Promise<TaskResult>
+): Promise<TaskResult> {
+  const { retry } = options;
+
+  // No retry config - run once
+  if (!retry) {
+    return runAgentFn(options);
+  }
+
+  let attempt = 1;
+  let lastError = "";
+  let lastResult: TaskResult | null = null;
+
+  while (attempt <= retry.maxAttempts) {
+    const result = await runAgentFn(options);
+
+    if (result.exitCode === 0 || !result.error) {
+      // Success - return immediately
+      return result;
+    }
+
+    lastError = result.error;
+    lastResult = result;
+
+    // Check if we should retry
+    if (!shouldRetry(lastError, retry)) {
+      return result;
+    }
+
+    // Check if we've exhausted attempts
+    if (attempt >= retry.maxAttempts) {
+      return result;
+    }
+
+    // Calculate and wait for backoff
+    const backoffMs = calculateBackoff(retry.backoffMs, attempt);
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+    attempt++;
+  }
+
+  // Should not reach here, but return last result if it does
+  return lastResult as TaskResult;
+}
+
+// ============================================================================
+// Executor Implementation
+// ============================================================================
 
 /** Options for running a single agent task */
 export interface ExecutorOptions {
@@ -47,6 +145,10 @@ export interface ExecutorOptions {
   signal?: AbortSignal;
   /** Progress callback */
   onProgress?: (progress: TaskProgress) => void;
+  /** Retry configuration for transient failures */
+  retry?: RetryConfig;
+  /** Resource limits for this task execution */
+  resourceLimits?: ResourceLimits;
 }
 
 /**
@@ -234,6 +336,17 @@ function extractToolArgsPreview(
  * Run a single agent task in a subprocess.
  */
 export async function runAgent(options: ExecutorOptions): Promise<TaskResult> {
+  // If retry config is present, use the retry wrapper
+  if (options.retry) {
+    return runAgentWithRetry(options, runAgentOnce);
+  }
+  
+  // Otherwise, run once without retry logic
+  return runAgentOnce(options);
+}
+
+/** Internal function that runs an agent once (no retry logic) */
+async function runAgentOnce(options: ExecutorOptions): Promise<TaskResult> {
   const {
     task,
     cwd,

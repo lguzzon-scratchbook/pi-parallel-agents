@@ -14,7 +14,7 @@ Guidelines for AI agents working on this codebase.
 ```
 src/
 ├── index.ts      # Main extension entry point, tool registration, mode dispatch
-├── executor.ts   # Subprocess execution, spawns `pi --mode json` processes
+├── executor.ts   # Subprocess execution, spawns `pi --mode json` processes, retry mechanism
 ├── parallel.ts   # Concurrency utilities (worker pool, race with abort)
 ├── dag.ts        # DAG engine for team mode (build, validate, execute task graphs, iterative review loops)
 ├── workspace.ts  # Shared workspace for team artifact exchange
@@ -39,6 +39,10 @@ src/
 6. **Context building**: Context is built from multiple sources (user string, files, git info) before execution. This avoids subagents needing to re-read the same files.
 
 7. **Cross-task references**: When `{task_N}` placeholders are detected in parallel tasks, execution switches to sequential mode to allow substitution.
+
+8. **Retry mechanism**: Failed tasks can be retried with exponential backoff and pattern-based error filtering via `RetryConfig`.
+
+9. **Iterative refinement**: Team mode supports review loops where reviewers can request revisions until quality thresholds are met or max iterations reached.
 
 ## Execution Modes
 
@@ -67,15 +71,52 @@ System prompt goes here.
 ```
 
 **Locations:**
+
 - `~/.pi/agent/agents/*.md` - User-level (always available)
 - `.pi/agents/*.md` - Project-level (requires `agentScope: "both"` or `"project"`)
+
+### Agent Inheritance
+
+Agents can inherit from other agents using the `extends` property:
+
+```markdown
+---
+name: base-agent
+description: Base agent with common tools
+tools: read, bash, ls
+model: claude-haiku-4-5
+thinking: medium
+---
+# Base system prompt
+```
+
+```markdown
+---
+name: specialized-agent  
+description: Specialized agent that extends base
+extends: base-agent
+tools: read, bash, grep, find, write
+model: claude-sonnet-4-5
+---
+# Specialized system prompt that extends base
+```
+
+When an agent extends another:
+1. Tools are combined (union of base and child tools)
+2. Model is inherited from base unless overridden by child
+3. System prompt is not inherited - child agent uses its own prompt
+4. Circular dependencies are detected and will throw an error
+
+The inheritance is resolved automatically when agents are loaded, and the resolved values are available in `resolvedTools` and `resolvedModel` fields.
 
 ### Resolution Order
 
 When an `agent` parameter is specified:
+
 1. Look up the agent by name
-2. Use agent's `model`, `tools`, `systemPrompt`, `thinking` as defaults
-3. Inline parameters override agent defaults
+2. Resolve inheritance chain if `extends` is specified
+3. Use agent's `model`, `tools`, `systemPrompt`, `thinking` as defaults (including inherited values)
+4. Inline parameters override agent defaults
 
 Example: `{ agent: "scout", model: "claude-sonnet-4-5" }` uses scout's tools/systemPrompt but with sonnet model.
 
@@ -154,6 +195,25 @@ pi -e ./src/index.ts -p 'run a chain: scout to analyze, then planner to plan'
 5. Add CLI flag handling in `runAgent()` if needed
 6. Update README.md and AGENTS.md
 
+### Implementing agent inheritance
+
+1. Add `extends?: string` field to `AgentConfig` interface in `agents.ts`
+2. Add `resolvedTools?: string[]` and `resolvedModel?: string` fields
+3. Implement `resolveAgentInheritance()` function to compute inherited values
+4. Update `loadAgentsFromDir()` to read `extends` from frontmatter
+5. Update `discoverAgents()` to call `resolveAgentInheritance()` after loading
+6. Update `resolveAgentSettings()` in `index.ts` to use `resolvedTools` and `resolvedModel`
+7. Write tests for inheritance resolution and circular dependency detection
+
+### Adding resource limits
+
+1. Define `ResourceLimitsSchema` in `types.ts` with appropriate fields
+2. Add `resourceLimits?: ResourceLimits` to relevant schemas (`TaskItemSchema`, `ChainStepSchema`, etc.)
+3. Add `resourceLimits` to `ExecutorOptions` interface in `executor.ts`
+4. Update all mode handlers in `index.ts` to pass through resource limits
+5. Implement enforcement logic in `executor.ts` if `enforceLimits` is true (optional)
+6. Write tests for resource limit validation and schema
+
 ### Improving progress display
 
 Tool argument previews are in `extractToolArgsPreview()` in `executor.ts`. Add tool-specific formatting there for better context during execution.
@@ -169,6 +229,7 @@ Tool argument previews are in `extractToolArgsPreview()` in `executor.ts`. Add t
 ### Modifying agent discovery
 
 Agent discovery logic is in `agents.ts`:
+
 - `discoverAgents()` - Main discovery function
 - `loadAgentsFromDir()` - Loads agents from a directory
 - `findNearestProjectAgentsDir()` - Walks up to find `.pi/agents`
@@ -178,6 +239,7 @@ Agent discovery logic is in `agents.ts`:
 ### Adding context sources
 
 Context building is in `context.ts`:
+
 - `readContextFiles()` - Reads files and formats as markdown
 - `getGitContext()` - Gathers git info (branch, diff, status, log)
 - `buildContext()` - Combines all sources into a single string
@@ -191,13 +253,80 @@ Context building is in `context.ts`:
 
 All are peer dependencies - pi provides them at runtime.
 
-## Error Handling
+## Error Handling & Retry Mechanism
 
-- Subprocess failures set `exitCode !== 0` and populate `error` field
-- Chain mode stops on first failure, returns partial results
-- Race mode aborts losers when winner completes
-- Parallel mode continues all tasks, aggregates successes/failures
-- AbortSignal propagates to kill subprocesses gracefully
+- **Automatic retries**: Failed tasks can be retried with exponential backoff
+- **Error filtering**: Configure `retryOn` patterns to only retry specific errors, or `skipOn` to exclude certain errors
+- **Backoff calculation**: Delay doubles each attempt, capped at 60 seconds
+- **Subprocess failures**: Set `exitCode !== 0` and populate `error` field
+- **Chain mode**: Stops on first failure, returns partial results
+- **Race mode**: Aborts losers when winner completes
+- **Parallel mode**: Continues all tasks, aggregates successes/failures
+- **AbortSignal**: Propagates to kill subprocesses gracefully
+
+### Retry Configuration
+
+```typescript
+interface RetryConfig {
+  maxAttempts: number;      // Maximum retry attempts (including initial)
+  backoffMs: number;        // Base delay between retries (exponential)
+  retryOn?: string[];       // Only retry on errors matching these patterns
+  skipOn?: string[];        // Skip retry on errors matching these patterns
+}
+```
+
+Retry configuration can be specified at multiple levels:
+- **Task level**: Per-task retry in parallel mode
+- **Chain step level**: Per-step retry in chain mode
+- **Race level**: Retry configuration for all models in race mode
+- **Team member level**: Per-member retry in team mode
+- **Team task level**: Per-task retry in team DAG mode
+
+The retry mechanism uses exponential backoff with a 60-second maximum delay between attempts.
+
+### Resource Limits
+
+```typescript
+interface ResourceLimits {
+  maxMemoryMB?: number;            // Maximum memory usage in MB
+  maxDurationMs?: number;          // Maximum execution time in milliseconds (default: 5 minutes)
+  maxConcurrentToolCalls?: number; // Maximum concurrent tool calls
+  enforceLimits?: boolean;         // Whether to enforce limits or just warn
+}
+```
+
+Resource limits can be specified at multiple levels:
+- **Task level**: Per-task limits in parallel mode
+- **Chain step level**: Per-step limits in chain mode  
+- **Race level**: Limits for all models in race mode
+- **Team member level**: Per-member limits in team mode
+- **Team task level**: Per-task limits in team DAG mode
+
+### Usage Examples
+
+```typescript
+// Retry on network errors only
+const retryConfig = {
+  maxAttempts: 3,
+  backoffMs: 1000,
+  retryOn: ["network error", "timeout", "connection"]
+};
+
+// Skip retry on fatal errors
+const retryConfig = {
+  maxAttempts: 3,
+  backoffMs: 1000,
+  skipOn: ["fatal error", "syntax error", "permission denied"]
+};
+
+// Resource limits example
+const resourceLimits = {
+  maxMemoryMB: 1024,
+  maxDurationMs: 300000, // 5 minutes
+  maxConcurrentToolCalls: 5,
+  enforceLimits: true
+};
+```
 
 ## Output Features
 
@@ -209,6 +338,7 @@ All are peer dependencies - pi provides them at runtime.
 ## Output Limits
 
 Defined in `types.ts`:
+
 - `MAX_OUTPUT_BYTES`: 50KB per task
 - `MAX_OUTPUT_LINES`: 2000 lines per task
 - `MAX_CONCURRENCY`: 8 parallel tasks

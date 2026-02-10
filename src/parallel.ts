@@ -117,30 +117,31 @@ export async function raceWithAbort<T>(
     result: T;
   }
 
-  const promises = tasks.map(async (task): Promise<RaceResult> => {
-    const result = await task.run(combinedSignal);
-    return { id: task.id, result };
+  // Track if winner was found and results
+  let winnerFound = false;
+  let winnerResult: RaceResult | null = null;
+
+  const promises = tasks.map(async (task): Promise<void> => {
+    try {
+      const result = await task.run(combinedSignal);
+      if (!winnerFound) {
+        // First successful result wins
+        winnerFound = true;
+        abortController.abort(); // Abort remaining tasks
+        winnerResult = { id: task.id, result };
+      }
+    } catch {
+      // Task failed, continue waiting for others
+    }
   });
 
-  try {
-    // First to complete successfully wins
-    const winner = await Promise.race(
-      promises.map((p) =>
-        p.catch(() => {
-          // Ignore individual failures, wait for a winner
-          return new Promise<RaceResult>(() => {});
-        })
-      )
-    );
+  // Wait for all promises (they need to complete for cleanup)
+  await Promise.all(promises);
 
-    // Cancel remaining tasks
-    abortController.abort();
-
-    return { winner: winner.id, result: winner.result };
-  } catch {
-    if (parentSignal?.aborted) {
-      return { aborted: true };
-    }
-    throw new Error("All race tasks failed");
+  if (winnerResult) {
+    return { winner: winnerResult.id, result: winnerResult.result };
   }
+
+  // All tasks failed
+  throw new Error("All race tasks failed");
 }

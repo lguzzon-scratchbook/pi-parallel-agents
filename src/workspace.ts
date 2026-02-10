@@ -20,12 +20,16 @@ export interface Workspace {
 
 /**
  * Create a new workspace for a team session.
+ * @param teamName Optional name for the team session, used in directory naming
+ * @param rootDir Optional custom root directory (for testing purposes)
  */
-export function createWorkspace(teamName?: string): Workspace {
+export function createWorkspace(teamName?: string, rootDir?: string): Workspace {
   const suffix = teamName
     ? teamName.replace(/[^\w-]/g, "_").slice(0, 30)
     : `team-${Date.now()}`;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `pi-${suffix}-`));
+  
+  const tempBase = rootDir || os.tmpdir();
+  const root = fs.mkdtempSync(path.join(tempBase, `pi-${suffix}-`));
 
   const tasksDir = path.join(root, "tasks");
   const artifactsDir = path.join(root, "artifacts");
