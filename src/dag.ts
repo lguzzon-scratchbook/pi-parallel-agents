@@ -370,17 +370,33 @@ Please revise your work to address the reviewer's feedback. Focus on the specifi
 }
 
 /**
- * Resolve \`{task:id}\` references in task text with completed task outputs.
+ * Resolve `{task:id}`, `{task_N}`, `{result:id}`, and `{result_N}` references in task text.
+ * Supports both name-based (e.g., {task:analyzer}) and index-based (e.g., {task_0}) references.
  */
 export function resolveTaskReferences(
   text: string,
   nodes: Map<string, DagNode>
 ): string {
-  return text.replace(/\{task:([^}]+)\}/g, (match, taskId) => {
-    const node = nodes.get(taskId);
+  // Get all completed nodes in order
+  const completedNodes = [...nodes.values()].filter(n => n.status === "completed");
+  
+  return text.replace(/\{(task|result)(?:_|\:)(\w+)\}/g, (match, type, ref) => {
+    // Try index-based first (e.g., {task_0}, {result_1})
+    const numIndex = parseInt(ref, 10);
+    if (!isNaN(numIndex) && numIndex >= 0 && numIndex < completedNodes.length) {
+      const node = completedNodes[numIndex];
+      if (node?.result?.output) {
+        return node.result.output;
+      }
+      return match;
+    }
+    
+    // Try name-based (e.g., {task:analyzer}, {result:analyzer})
+    const node = nodes.get(ref);
     if (node?.result?.output) {
       return node.result.output;
     }
+    
     return match; // Keep placeholder if not resolved
   });
 }

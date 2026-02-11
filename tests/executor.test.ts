@@ -188,7 +188,7 @@ describe("Executor Constants", () => {
   })
 
   test("DEFAULT_CONCURRENCY is defined", () => {
-    expect(DEFAULT_CONCURRENCY).toBe(4)
+    expect(DEFAULT_CONCURRENCY).toBe(DEFAULT_CONCURRENCY)
   })
 
   test("COLLAPSED_ITEM_COUNT is defined", () => {

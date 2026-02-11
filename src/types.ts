@@ -431,7 +431,7 @@ export type ParallelParams = Static<typeof ParallelParamsSchema>;
 // ============================================================================
 
 export const MAX_CONCURRENCY = 8;
-export const DEFAULT_CONCURRENCY = 4;
+export const DEFAULT_CONCURRENCY = 8;
 export const MAX_OUTPUT_BYTES = 50 * 1024; // 50KB
 export const MAX_OUTPUT_LINES = 2000;
 export const COLLAPSED_ITEM_COUNT = 10;

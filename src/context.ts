@@ -50,7 +50,7 @@ export function getGitContext(cwd: string, options: GitContextOptions | boolean)
     return "";
   }
   const opts: GitContextOptions = options === true 
-    ? { branch: true, diffStats: true, status: true }
+    ? { branch: true, status: true }
     : options;
   
   const sections: string[] = [];
