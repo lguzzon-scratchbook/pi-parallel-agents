@@ -37,6 +37,8 @@ export interface AgentConfig {
   resolvedTools?: string[];
   /** Computed model after inheritance resolution */
   resolvedModel?: string;
+  /** Computed thinking after inheritance resolution */
+  resolvedThinking?: number | string;
 }
 
 export interface AgentDiscoveryResult {
@@ -164,14 +166,22 @@ export function resolveAgentInheritance(agents: AgentConfig[]): AgentConfig[] {
 
         // Model: child overrides base
         agent.resolvedModel = agent.model || baseAgent.resolvedModel || baseAgent.model;
+
+        // Thinking: child overrides base
+        if (!agent.thinking) {
+          agent.resolvedThinking = baseAgent.resolvedThinking ?? baseAgent.thinking;
+        }
       }
     } else {
-      // No inheritance, just copy tools/model to resolved fields
+      // No inheritance, just copy tools/model/thinking to resolved fields
       if (agent.tools && agent.tools.length > 0) {
         agent.resolvedTools = [...agent.tools];
       }
       if (agent.model) {
         agent.resolvedModel = agent.model;
+      }
+      if (agent.thinking) {
+        agent.resolvedThinking = agent.thinking;
       }
     }
 

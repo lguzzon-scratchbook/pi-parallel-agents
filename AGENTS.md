@@ -138,6 +138,8 @@ const sharedContext = buildContext(cwd, {
 
 This reduces redundant file reads across parallel tasks.
 
+**Note:** When `gitContext` is not specified in parallel mode, it defaults to `{ branch: true, status: true }`. This provides basic git information (current branch and modified files) without requiring explicit configuration.
+
 ## Cross-Task References
 
 In parallel mode, tasks can reference earlier task outputs using either index-based or name-based patterns:
@@ -392,7 +394,7 @@ Context is built from multiple sources before execution:
 
 ```typescript
 // Read and format files as markdown context
-readContextFiles(filePaths: string[]): string
+readContextFiles(cwd: string, filePaths: string[]): string
 
 // Gather git information (branch, status, diff, log)
 getGitContext(options: GitContextOptions): string

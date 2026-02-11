@@ -564,10 +564,16 @@ export default function (pi: ExtensionAPI) {
             // Substitute cross-references with previous task outputs
             let taskText = t.task;
             if (hasCrossRefs) {
-              taskText = taskText.replace(/\{(task|result)_(\d+)\}/g, (match, _type, numStr) => {
-                const refIndex = parseInt(numStr, 10);
-                if (refIndex >= 0 && refIndex < allResults.length) {
-                  return allResults[refIndex].output || "(no output from task)";
+              taskText = taskText.replace(/\{(task|result)(?:_|\:)(\w+)\}/g, (match, _type, ref) => {
+                // Try index-based first
+                const numIndex = parseInt(ref, 10);
+                if (!isNaN(numIndex) && numIndex >= 0 && numIndex < allResults.length) {
+                  return allResults[numIndex].output || "(no output from task)";
+                }
+                // Try name-based
+                const namedIndex = progress.findIndex(p => p.name === ref);
+                if (namedIndex >= 0 && allResults[namedIndex]) {
+                  return allResults[namedIndex].output || "(no output from task)";
                 }
                 return match; // Keep placeholder if referenced task doesn't exist yet
               });
