@@ -535,7 +535,8 @@ export default function (pi: ExtensionAPI) {
         const allResults: TaskResult[] = [];
         
         // Check if any task has cross-references to other tasks
-        const crossRefPattern = /\{(task|result)_(\d+)\}/;
+        // Supports both {task_0}, {result_0} (index-based) and {task:name}, {result:name} (name-based)
+        const crossRefPattern = /\{(task|result)(?:_|\:)(\w+)\}/;
         const hasCrossRefs = tasks.some(t => crossRefPattern.test(t.task));
 
         const { results: parallelResults, aborted } = await mapWithConcurrencyLimit(

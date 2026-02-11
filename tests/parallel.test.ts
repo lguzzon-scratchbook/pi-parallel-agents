@@ -343,7 +343,7 @@ describe("Parallel Execution", () => {
         }
       ]
 
-      await expect(raceWithAbort(tasks)).rejects.toThrow("All race tasks failed")
+      await expect(raceWithAbort(tasks)).rejects.toThrow("All race models failed:")
     })
   })
 })

@@ -20,6 +20,7 @@ import {
   MAX_OUTPUT_BYTES,
   MAX_OUTPUT_LINES,
 } from "./types.js";
+import process from "node:process";
 
 // ============================================================================
 // Retry Functions
@@ -111,6 +112,127 @@ export async function runAgentWithRetry(
 
   // Should not reach here, but return last result if it does
   return lastResult as TaskResult;
+}
+
+// ============================================================================
+// Resource Limits Enforcement
+// ============================================================================
+
+/**
+ * Create an AbortSignal that fires when the duration limit is reached.
+ */
+export function createDurationAbortSignal(
+  maxDurationMs: number,
+  parentSignal?: AbortSignal
+): AbortSignal {
+  const controller = new AbortController();
+  
+  // Combine with parent signal
+  const signals: AbortSignal[] = [controller.signal];
+  if (parentSignal) {
+    signals.push(parentSignal);
+  }
+  
+  if (signals.length > 1) {
+    const combined = AbortSignal.any(signals);
+    const timeoutId = setTimeout(() => {
+      if (!combined.aborted) {
+        controller.abort(new Error(`Duration limit exceeded: ${maxDurationMs}ms`));
+      }
+    }, maxDurationMs);
+    
+    combined.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
+    return combined;
+  }
+  
+  const timeoutId = setTimeout(() => {
+    if (!controller.signal.aborted) {
+      controller.abort(new Error(`Duration limit exceeded: ${maxDurationMs}ms`));
+    }
+  }, maxDurationMs);
+  
+  controller.signal.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
+  return controller.signal;
+}
+
+/**
+ * Track tool execution and abort if too many concurrent tool calls.
+ */
+export class ToolCallTracker {
+  private currentCalls: number = 0;
+  private maxConcurrentToolCalls: number;
+  private controller: AbortController;
+  private onLimitExceeded?: () => void;
+  
+  constructor(maxConcurrentToolCalls: number, onLimitExceeded?: () => void) {
+    this.maxConcurrentToolCalls = maxConcurrentToolCalls;
+    this.controller = new AbortController();
+    this.onLimitExceeded = onLimitExceeded;
+  }
+  
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+  
+  get currentCount(): number {
+    return this.currentCalls;
+  }
+  
+  startTool(): boolean {
+    this.currentCalls++;
+    if (this.maxConcurrentToolCalls > 0 && this.currentCalls > this.maxConcurrentToolCalls) {
+      this.controller.abort(new Error(`Concurrent tool call limit exceeded: ${this.maxConcurrentToolCalls}`));
+      this.onLimitExceeded?.();
+      return false;
+    }
+    return true;
+  }
+  
+  endTool(): void {
+    this.currentCalls = Math.max(0, this.currentCalls - 1);
+  }
+}
+
+/**
+ * Monitor memory usage and abort if limit is exceeded.
+ */
+export class MemoryMonitor {
+  private maxMemoryMB: number;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
+  private controller: AbortController;
+  private onLimitExceeded?: () => void;
+  
+  constructor(maxMemoryMB: number, onLimitExceeded?: () => void) {
+    this.maxMemoryMB = maxMemoryMB;
+    this.controller = new AbortController();
+    this.onLimitExceeded = onLimitExceeded;
+  }
+  
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+  
+  start(): void {
+    if (this.maxMemoryMB <= 0) return;
+    
+    const checkInterval = 5000; // Check every 5 seconds
+    this.intervalId = setInterval(() => {
+      const usage = process.memoryUsage();
+      const usedMB = usage.heapUsed / (1024 * 1024);
+      if (usedMB > this.maxMemoryMB) {
+        this.controller.abort(new Error(`Memory limit exceeded: ${usedMB.toFixed(2)}MB > ${this.maxMemoryMB}MB`));
+        this.onLimitExceeded?.();
+        this.stop();
+      }
+    }, checkInterval);
+  }
+  
+  stop(): void {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+  }
 }
 
 // ============================================================================
@@ -361,6 +483,7 @@ async function runAgentOnce(options: ExecutorOptions): Promise<TaskResult> {
     step,
     signal,
     onProgress,
+    resourceLimits,
   } = options;
 
   const startTime = Date.now();
@@ -383,11 +506,46 @@ async function runAgentOnce(options: ExecutorOptions): Promise<TaskResult> {
   };
 
   const usage: UsageStats = createEmptyUsage();
+  
+  // Track tool usage for tool usage summary (e.g., read×5, bash×3)
+  const toolUsage: Record<string, number> = {};
 
   const emitProgress = () => {
     progress.durationMs = Date.now() - startTime;
     onProgress?.({ ...progress });
   };
+
+  // ============================================================================
+  // Resource Limits Enforcement
+  // ============================================================================
+
+  let durationController: AbortController | null = null;
+  let memoryMonitor: MemoryMonitor | null = null;
+  let toolCallTracker: ToolCallTracker | null = null;
+
+  const signals: AbortSignal[] = [];
+  if (signal) {
+    signals.push(signal);
+  }
+
+  if (resourceLimits?.maxDurationMs) {
+    durationController = new AbortController();
+    const durationSignal = createDurationAbortSignal(resourceLimits.maxDurationMs);
+    signals.push(durationSignal);
+  }
+
+  if (resourceLimits?.maxMemoryMB && resourceLimits.enforceLimits) {
+    memoryMonitor = new MemoryMonitor(resourceLimits.maxMemoryMB);
+    const memorySignal = memoryMonitor.signal;
+    signals.push(memorySignal);
+  }
+
+  if (resourceLimits?.maxConcurrentToolCalls && resourceLimits.enforceLimits) {
+    toolCallTracker = new ToolCallTracker(resourceLimits.maxConcurrentToolCalls);
+  }
+
+  const combinedSignal =
+    signals.length > 0 ? AbortSignal.any(signals) : undefined;
 
   // Build command args
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
@@ -432,6 +590,7 @@ async function runAgentOnce(options: ExecutorOptions): Promise<TaskResult> {
         cwd,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
+        signal: combinedSignal,
       });
 
       let buffer = "";
@@ -510,6 +669,10 @@ async function runAgentOnce(options: ExecutorOptions): Promise<TaskResult> {
               progress.recentTools.shift();
             }
             progress.toolCount++;
+            
+            // Track tool usage for summary
+            const toolName = progress.currentTool;
+            toolUsage[toolName] = (toolUsage[toolName] || 0) + 1;
           }
           progress.currentTool = undefined;
           progress.currentToolArgs = undefined;
@@ -580,11 +743,13 @@ async function runAgentOnce(options: ExecutorOptions): Promise<TaskResult> {
       exitCode,
       output: truncatedOutput,
       stderr,
+      fullOutputPath: tmpPromptPath ?? undefined,
       truncated,
       durationMs: Date.now() - startTime,
       usage,
       step,
       aborted: progress.status === "aborted",
+      toolUsage,
     };
 
     if (exitCode !== 0 && !result.aborted) {
@@ -625,3 +790,4 @@ async function runAgentOnce(options: ExecutorOptions): Promise<TaskResult> {
     }
   }
 }
+//

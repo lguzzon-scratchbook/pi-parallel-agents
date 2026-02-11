@@ -140,18 +140,23 @@ This reduces redundant file reads across parallel tasks.
 
 ## Cross-Task References
 
-In parallel mode, tasks can reference earlier task outputs:
+In parallel mode, tasks can reference earlier task outputs using either index-based or name-based patterns:
 
 ```json
 {
   "tasks": [
     { "task": "Analyze the code", "name": "analyzer" },
-    { "task": "Based on {task_0}, suggest improvements" }
+    { "task": "Based on {task_0}, suggest improvements" },
+    { "task": "Summarize findings from {task:analyzer}" }
   ]
 }
 ```
 
-When `{task_N}` or `{result_N}` patterns are detected, `maxConcurrency` is set to 1 to ensure sequential execution.
+**Supported patterns:**
+- `{task_N}` or `{result_N}` - Index-based references (e.g., `{task_0}`, `{result_1}`)
+- `{task:name}` or `{result:name}` - Name-based references (e.g., `{task:analyzer}`, `{result:analyzer}`)
+
+When any of these patterns are detected, `maxConcurrency` is set to 1 to ensure sequential execution.
 
 ## Code Conventions
 
@@ -211,10 +216,10 @@ pi -e ./src/index.ts -p 'run a chain: scout to analyze, then planner to plan'
 2. Add `resourceLimits?: ResourceLimits` to relevant schemas (`TaskItemSchema`, `ChainStepSchema`, etc.) ✅ **IMPLEMENTED**
 3. Add `resourceLimits` to `ExecutorOptions` interface in `executor.ts` ✅ **IMPLEMENTED**
 4. Update all mode handlers in `index.ts` to pass through resource limits ✅ **IMPLEMENTED**
-5. Implement enforcement logic in `executor.ts` if `enforceLimits` is true (optional) ❌ **NOT IMPLEMENTED** - Schema defined but no enforcement logic
+5. Implement enforcement logic in `executor.ts` if `enforceLimits` is true ✅ **IMPLEMENTED** - Uses AbortSignal for duration, memory polling, and tool call tracking
 6. Write tests for resource limit validation and schema ✅ **IMPLEMENTED**
 
-**Note**: Resource limits are now passed through all execution modes (single, parallel, chain, race, team) but actual enforcement is not yet implemented. The `enforceLimits` flag is currently advisory only.
+**Note**: Resource limits are now passed through all execution modes (single, parallel, chain, race, team) with full enforcement support via AbortSignal when `enforceLimits` is true.
 
 ### Improving progress display
 
@@ -262,7 +267,7 @@ All are peer dependencies - pi provides them at runtime.
 - **Backoff calculation**: Delay doubles each attempt, capped at 60 seconds
 - **Subprocess failures**: Set `exitCode !== 0` and populate `error` field
 - **Chain mode**: Stops on first failure, returns partial results
-- **Race mode**: Aborts losers when winner completes
+- **Race mode**: Aborts losers when winner completes. If ALL models fail, returns an aggregate error with details of all failures.
 - **Parallel mode**: Continues all tasks, aggregates successes/failures
 - **AbortSignal**: Propagates to kill subprocesses gracefully
 

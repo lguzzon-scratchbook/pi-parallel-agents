@@ -48,12 +48,15 @@ export function addUsage(target: UsageStats, source: Partial<UsageStats>): void 
 /** Schema for resource limits */
 export const ResourceLimitsSchema = Type.Object({
   maxMemoryMB: Type.Optional(Type.Number({ description: "Maximum memory usage in megabytes" })),
-  maxDurationMs: Type.Optional(Type.Number({ description: "Maximum execution duration in milliseconds" })),
+  maxDurationMs: Type.Optional(Type.Number({ description: "Maximum execution duration in milliseconds (default: 5 minutes)", default: 300000 })),
   maxConcurrentToolCalls: Type.Optional(Type.Number({ description: "Maximum concurrent tool calls allowed" })),
   enforceLimits: Type.Optional(Type.Boolean({ description: "Whether to enforce limits (if false, limits are advisory)" })),
 });
 
 export type ResourceLimits = Static<typeof ResourceLimitsSchema>;
+
+// Default maximum duration for task execution (5 minutes)
+export const DEFAULT_MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Schema for retry configuration */
 export const RetryConfigSchema = Type.Object({
@@ -100,6 +103,8 @@ export interface TaskResult {
   truncated: boolean;
   durationMs: number;
   usage: UsageStats;
+  /** Summary of tools used by this task (e.g., {read: 5, bash: 3}) */
+  toolUsage?: Record<string, number>;
   error?: string;
   aborted?: boolean;
   step?: number; // For chain mode

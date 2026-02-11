@@ -121,6 +121,13 @@ export async function raceWithAbort<T>(
   let winnerFound = false;
   let winnerResult: RaceResult | null = null;
 
+  // Track all failures for aggregate error reporting
+  interface RaceFailure {
+    id: string;
+    error: string;
+  }
+  const failures: RaceFailure[] = [];
+
   const promises = tasks.map(async (task): Promise<void> => {
     try {
       const result = await task.run(combinedSignal);
@@ -130,8 +137,10 @@ export async function raceWithAbort<T>(
         abortController.abort(); // Abort remaining tasks
         winnerResult = { id: task.id, result };
       }
-    } catch {
-      // Task failed, continue waiting for others
+    } catch (error: unknown) {
+      // Track failure with details
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      failures.push({ id: task.id, error: errorMessage });
     }
   });
 
@@ -144,6 +153,7 @@ export async function raceWithAbort<T>(
     return { winner: result.id, result: result.result };
   }
 
-  // All tasks failed
-  throw new Error("All race tasks failed");
+  // All tasks failed - return aggregate error with details of all failures
+  const errorDetails = failures.map(f => `[${f.id}]: ${f.error}`).join("\n");
+  throw new Error(`All race models failed:\n${errorDetails}`);
 }
