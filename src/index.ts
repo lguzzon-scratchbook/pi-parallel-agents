@@ -25,6 +25,8 @@ import {
   type TaskResult,
   type AgentScope,
   type TeamTask,
+  type ResourceLimits,
+  type RetryConfig,
   ParallelParamsSchema,
   createEmptyUsage,
   addUsage,
@@ -71,6 +73,8 @@ function resolveAgentSettings(
     tools?: string[];
     systemPrompt?: string;
     thinking?: number | string;
+    resourceLimits?: ResourceLimits;
+    retry?: RetryConfig;
   }
 ): {
   provider?: string;
@@ -78,6 +82,8 @@ function resolveAgentSettings(
   tools?: string[];
   systemPrompt?: string;
   thinking?: number | string;
+  resourceLimits?: ResourceLimits;
+  retry?: RetryConfig;
   agentConfig?: AgentConfig;
 } {
   if (!agentName) {
@@ -98,6 +104,8 @@ function resolveAgentSettings(
     tools: overrides.tools ?? agentConfig.resolvedTools ?? agentConfig.tools,
     systemPrompt: overrides.systemPrompt ?? agentConfig.systemPrompt,
     thinking: overrides.thinking ?? agentConfig.thinking,
+    resourceLimits: overrides.resourceLimits,
+    retry: overrides.retry,
     agentConfig,
   };
 }
@@ -233,6 +241,8 @@ export default function (pi: ExtensionAPI) {
           tools: params.tools,
           systemPrompt: params.systemPrompt,
           thinking: params.thinking,
+          resourceLimits: params.resourceLimits,
+          retry: params.retry,
         });
         
         // Warn if agent was specified but not found
@@ -257,6 +267,8 @@ export default function (pi: ExtensionAPI) {
           tools: resolved.tools,
           systemPrompt: resolved.systemPrompt,
           thinking: resolved.thinking,
+          resourceLimits: resolved.resourceLimits,
+          retry: resolved.retry,
           id: "single",
           name: resolved.agentConfig?.name || "single",
           signal,
@@ -312,6 +324,8 @@ export default function (pi: ExtensionAPI) {
             tools: step.tools,
             systemPrompt: step.systemPrompt,
             thinking: step.thinking,
+            resourceLimits: step.resourceLimits,
+            retry: step.retry,
           });
           const stepName = resolved.agentConfig?.name || `Step ${i + 1}`;
 
@@ -337,6 +351,8 @@ export default function (pi: ExtensionAPI) {
             tools: resolved.tools,
             systemPrompt: resolved.systemPrompt,
             thinking: resolved.thinking,
+            resourceLimits: resolved.resourceLimits,
+            retry: resolved.retry,
             id: stepId,
             name: stepName,
             step: i + 1,
@@ -380,7 +396,7 @@ export default function (pi: ExtensionAPI) {
       // Race Mode
       // ========================================================================
       if (hasRace && params.race) {
-        const { task, models, provider: raceProvider, tools, systemPrompt, thinking } = params.race;
+        const { task, models, provider: raceProvider, tools, systemPrompt, thinking, resourceLimits, retry } = params.race;
         const results: TaskResult[] = [];
         const progress: TaskProgress[] = [];
 
@@ -415,6 +431,8 @@ export default function (pi: ExtensionAPI) {
               tools,
               systemPrompt,
               thinking,
+              resourceLimits,
+              retry,
               id: model,
               name: model,
               signal: raceSignal,
@@ -494,7 +512,12 @@ export default function (pi: ExtensionAPI) {
         }
 
         const progress: TaskProgress[] = tasks.map((t, i) => {
-          const resolved = resolveAgentSettings(t.agent, agents, { provider: t.provider, model: t.model });
+          const resolved = resolveAgentSettings(t.agent, agents, { 
+            provider: t.provider, 
+            model: t.model,
+            resourceLimits: t.resourceLimits,
+            retry: t.retry,
+          });
           return {
             id: generateTaskId(i, t.name || resolved.agentConfig?.name),
             name: t.name || resolved.agentConfig?.name,
@@ -527,6 +550,8 @@ export default function (pi: ExtensionAPI) {
               tools: t.tools,
               systemPrompt: t.systemPrompt,
               thinking: t.thinking,
+              resourceLimits: t.resourceLimits,
+              retry: t.retry,
             });
             
             const taskId = generateTaskId(index, t.name || resolved.agentConfig?.name);
@@ -555,6 +580,8 @@ export default function (pi: ExtensionAPI) {
               tools: resolved.tools,
               systemPrompt: resolved.systemPrompt,
               thinking: resolved.thinking,
+              resourceLimits: resolved.resourceLimits,
+              retry: resolved.retry,
               context: sharedContext,
               id: taskId,
               name: taskName,
@@ -679,6 +706,8 @@ export default function (pi: ExtensionAPI) {
               tools: memberDef.tools,
               systemPrompt: memberDef.systemPrompt,
               thinking: memberDef.thinking,
+              resourceLimits: memberDef.resourceLimits,
+              retry: memberDef.retry,
             });
 
             if (memberDef.agent && !resolved.agentConfig) {
@@ -694,6 +723,8 @@ export default function (pi: ExtensionAPI) {
               tools: resolved.tools,
               systemPrompt: resolved.systemPrompt,
               thinking: resolved.thinking,
+              resourceLimits: resolved.resourceLimits,
+              retry: resolved.retry,
             });
           }
 

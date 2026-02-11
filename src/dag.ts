@@ -7,7 +7,7 @@
  * for review before continuing.
  */
 
-import type { TeamTask, TaskResult, TaskProgress, ReviewConfig } from "./types.js";
+import type { TeamTask, TaskResult, TaskProgress, ReviewConfig, ResourceLimits, RetryConfig } from "./types.js";
 import { runAgent } from "./executor.js";
 import type { AgentConfig } from "./agents.js";
 
@@ -49,6 +49,8 @@ export interface TeamMember {
   tools?: string[];
   systemPrompt?: string;
   thinking?: number | string;
+  resourceLimits?: ResourceLimits;
+  retry?: RetryConfig;
 }
 
 export interface DagExecutionOptions {
@@ -536,6 +538,8 @@ export async function executeDag(
         tools: review.tools ?? reviewMember?.tools,
         systemPrompt: reviewerSystemPrompt,
         thinking: reviewMember?.thinking,
+        resourceLimits: review.resourceLimits ?? reviewMember?.resourceLimits,
+        retry: review.retry ?? reviewMember?.retry,
         context: buildTaskContext(node),
         id: reviewProgressId,
         name: `${review.assignee}:review(${taskId})`,
@@ -622,6 +626,8 @@ export async function executeDag(
         tools: node.assignee?.tools,
         systemPrompt: node.assignee?.systemPrompt,
         thinking: node.assignee?.thinking,
+        resourceLimits: node.task.resourceLimits ?? node.assignee?.resourceLimits,
+        retry: node.task.retry ?? node.assignee?.retry,
         context: buildTaskContext(node),
         id: revisionProgressId,
         name: node.assignee?.role ? `${node.assignee.role}:${taskId}` : taskId,
@@ -733,6 +739,8 @@ export async function executeDag(
         tools,
         systemPrompt: member?.systemPrompt,
         thinking: member?.thinking,
+        resourceLimits: node.task.resourceLimits ?? member?.resourceLimits,
+        retry: node.task.retry ?? member?.retry,
         context,
         id: taskId,
         name: member?.role ? `${member.role}:${taskId}` : taskId,

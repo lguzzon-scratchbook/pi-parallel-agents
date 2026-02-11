@@ -138,8 +138,10 @@ export async function raceWithAbort<T>(
   // Wait for all promises (they need to complete for cleanup)
   await Promise.all(promises);
 
-  if (winnerResult) {
-    return { winner: winnerResult.id, result: winnerResult.result };
+  if (winnerResult !== null) {
+    // TypeScript is being overly strict here, but we know winnerResult is RaceResult if not null
+    const result = winnerResult as RaceResult;
+    return { winner: result.id, result: result.result };
   }
 
   // All tasks failed

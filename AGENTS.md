@@ -207,12 +207,14 @@ pi -e ./src/index.ts -p 'run a chain: scout to analyze, then planner to plan'
 
 ### Adding resource limits
 
-1. Define `ResourceLimitsSchema` in `types.ts` with appropriate fields
-2. Add `resourceLimits?: ResourceLimits` to relevant schemas (`TaskItemSchema`, `ChainStepSchema`, etc.)
-3. Add `resourceLimits` to `ExecutorOptions` interface in `executor.ts`
-4. Update all mode handlers in `index.ts` to pass through resource limits
-5. Implement enforcement logic in `executor.ts` if `enforceLimits` is true (optional)
-6. Write tests for resource limit validation and schema
+1. Define `ResourceLimitsSchema` in `types.ts` with appropriate fields ✅ **IMPLEMENTED**
+2. Add `resourceLimits?: ResourceLimits` to relevant schemas (`TaskItemSchema`, `ChainStepSchema`, etc.) ✅ **IMPLEMENTED**
+3. Add `resourceLimits` to `ExecutorOptions` interface in `executor.ts` ✅ **IMPLEMENTED**
+4. Update all mode handlers in `index.ts` to pass through resource limits ✅ **IMPLEMENTED**
+5. Implement enforcement logic in `executor.ts` if `enforceLimits` is true (optional) ❌ **NOT IMPLEMENTED** - Schema defined but no enforcement logic
+6. Write tests for resource limit validation and schema ✅ **IMPLEMENTED**
+
+**Note**: Resource limits are now passed through all execution modes (single, parallel, chain, race, team) but actual enforcement is not yet implemented. The `enforceLimits` flag is currently advisory only.
 
 ### Improving progress display
 
@@ -327,6 +329,137 @@ const resourceLimits = {
   enforceLimits: true
 };
 ```
+
+## Utility Functions & Implementation Details
+
+### Progress Display
+The `extractToolArgsPreview()` function in `executor.ts` provides tool-specific formatting for better context during execution:
+
+```typescript
+function extractToolArgsPreview(toolName: string, args: Record<string, unknown>): string
+```
+
+**Supported tools and formatting:**
+- `read`: Shows file path with line ranges if offset/limit specified
+- `write`: Shows file path and content size
+- `edit`: Shows file path
+- `bash`: Shows first 60 chars of command
+- `grep`/`rg`: Shows pattern and file path
+- `find`: Shows path and -name pattern
+- `mcp`: Shows tool/server/search name
+- `subagent`: Shows task or agent name
+- `todo`: Shows action and title
+
+### Workspace Management (Team Mode)
+Team mode uses a shared workspace for artifact exchange:
+
+```typescript
+// Create a workspace for team collaboration
+createWorkspace(teamName?: string, rootDir?: string): Workspace
+
+// Write task results to workspace
+writeTaskResult(workspace: Workspace, taskId: string, output: string, status: "completed" | "failed"): void
+
+// Clean up workspace directory
+cleanupWorkspace(workspace: Workspace): void
+```
+
+### DAG Execution (Team Mode)
+The DAG engine manages task dependencies and parallel execution:
+
+```typescript
+// Build and validate DAG from team tasks
+buildDag(tasks: TeamTask[], members: Map<string, TeamMember>): Map<string, DagNode>
+
+// Execute DAG with progress tracking
+executeDag(options: DagExecutionOptions): Promise<DagExecutionResult>
+```
+
+**Key features:**
+- Task dependency resolution
+- Parallel execution of independent tasks
+- Iterative refinement with review loops
+- Plan approval workflow
+- Circular dependency detection
+
+### Context Building
+Context is built from multiple sources before execution:
+
+```typescript
+// Read and format files as markdown context
+readContextFiles(filePaths: string[]): string
+
+// Gather git information (branch, status, diff, log)
+getGitContext(options: GitContextOptions): string
+
+// Combine all context sources
+buildContext(cwd: string, options: ContextOptions): string
+```
+
+### Parallel Execution Utilities
+```typescript
+// Generic parallel execution with concurrency limit
+mapWithConcurrencyLimit<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+  signal?: AbortSignal
+): Promise<{ results: R[], aborted: boolean }>
+
+// Race multiple promises, aborting losers when winner completes
+raceWithAbort<T>(tasks: Array<{ id: string; run: (signal: AbortSignal) => Promise<T> }>, signal?: AbortSignal): Promise<{ winner: string; result: T }>
+```
+
+### Agent Discovery & Inheritance
+```typescript
+// Discover agents from user and project directories
+discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult
+
+// Load agents from a directory
+loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[]
+
+// Find nearest .pi/agents directory
+findNearestProjectAgentsDir(cwd: string): string | null
+
+// Look up agent by name
+findAgent(agents: AgentConfig[], name: string): AgentConfig | undefined
+
+// Resolve agent inheritance chain
+resolveAgentInheritance(agents: AgentConfig[]): AgentConfig[]
+
+// Format agent list for display
+formatAgentList(agents: AgentConfig[], max?: number): { text: string; count: number }
+```
+
+### Error Handling & Retry Mechanism
+```typescript
+// Check if error should trigger a retry
+shouldRetry(error: string, retry?: RetryConfig): boolean
+
+// Calculate exponential backoff with 60-second cap
+calculateBackoff(baseMs: number, attempt: number): number
+
+// Run agent with retry logic
+runAgentWithRetry(options: ExecutorOptions, runAgentFn: (opts: ExecutorOptions) => Promise<TaskResult>): Promise<TaskResult>
+```
+
+### TypeScript Interfaces
+**Key interfaces defined in `types.ts`:**
+- `TaskProgress`: Progress tracking for running tasks
+- `TaskResult`: Final result from single task execution
+- `ParallelToolDetails`: Tool details stored in session for persistence
+- `AgentConfig`: Agent definition with inheritance support
+- `TeamMember` & `TeamTask`: Team coordination types
+- `DagNode` & `DagExecutionOptions`: DAG execution types
+- `ResourceLimits` & `RetryConfig`: Resource and retry configuration
+
+### Testing Infrastructure
+- **13 test files** with **179 tests** covering all major components
+- **Integration tests** for retry mechanism
+- **DAG tests** including dynamic task modifications
+- **Agent inheritance tests** with circular dependency detection
+- **Resource limits** schema validation tests
+- **Workspace management** tests
 
 ## Output Features
 

@@ -295,6 +295,8 @@ export const ReviewConfigSchema = Type.Object({
   provider: Type.Optional(Type.String({ description: 'Provider for the reviewer.' })),
   model: Type.Optional(Type.String({ description: 'Model for the reviewer. Overrides member default.' })),
   tools: Type.Optional(Type.Array(Type.String(), { description: 'Tools for the reviewer.' })),
+  resourceLimits: Type.Optional(ResourceLimitsSchema),
+  retry: Type.Optional(RetryConfigSchema),
 });
 
 export type ReviewConfig = Static<typeof ReviewConfigSchema>;
@@ -361,6 +363,7 @@ export const ParallelParamsSchema = Type.Object({
     })
   ),
   resourceLimits: Type.Optional(ResourceLimitsSchema),
+  retry: Type.Optional(RetryConfigSchema),
 
   // Parallel mode
   tasks: Type.Optional(
